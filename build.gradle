@@ -1,5 +1,5 @@
 plugins {
-    id 'fabric-loom' version '0.2.6-SNAPSHOT'
+    id 'java'
     id 'maven-publish'
     id 'com.jfrog.bintray' version '1.8.4'
     id 'net.minecrell.licenser' version '0.4.1'
@@ -9,40 +9,14 @@ sourceCompatibility = JavaVersion.VERSION_1_8
 targetCompatibility = JavaVersion.VERSION_1_8
 
 if (isNullOrEmpty(System.getenv("TRAVIS_TAG")) && !isNullOrEmpty(System.getenv('TRAVIS_BUILD_NUMBER'))) {
-    version = project.modVersion + '.' + System.getenv('TRAVIS_BUILD_NUMBER')
-} else {
-    version = project.modVersion
+    version += '.' + System.getenv('TRAVIS_BUILD_NUMBER')
 }
 logger.lifecycle("${project.repoName} version ${project.version}")
-group = project.mavenGroup
 
-minecraft {
+repositories {
 }
 
 dependencies {
-    //to change the versions see the gradle.properties file
-    minecraft "com.mojang:minecraft:${project.minecraftVersion}"
-    mappings "net.fabricmc:yarn:${project.yarnMappings}:v2"
-    modCompile "net.fabricmc:fabric-loader:${project.loaderVersion}"
-    
-    modCompile "net.fabricmc.fabric-api:fabric-api:${project.apiVersion}"
-
-    annotationProcessor 'net.fabricmc:fabric-mixin-compile-extensions:0.2.0.+'
-}
-
-sourceSets {
-    code {
-        compileClasspath += sourceSets.main.compileClasspath
-        compileClasspath += configurations.minecraftNamed
-        runtimeClasspath += sourceSets.main.runtimeClasspath
-        compileClasspath += configurations.minecraftNamed
-    }
-    data {
-        compileClasspath += sourceSets.code.compileClasspath
-        compileClasspath += sourceSets.code.output
-        runtimeClasspath += sourceSets.code.compileClasspath
-        runtimeClasspath += sourceSets.code.output
-    }
 }
 
 license {
@@ -52,22 +26,8 @@ license {
     newLine = false
 }
 
-// ensure that the encoding is set to UTF-8, no matter what the system default is
-// this fixes some edge cases with special characters not displaying correctly
-// see http://yodaconditions.net/blog/fix-for-java-file-encoding-problems-with-gradle.html
 tasks.withType(JavaCompile) {
     options.encoding = "UTF-8"
-    // Loom is just so cursed that it does not handle extra source sets nicely
-    options.annotationProcessorPath += configurations.annotationProcessor
-    doFirst {
-        def args = options.compilerArgs
-        project.minecraft {
-            args.add "-AinMapFileNamedIntermediary=" + mappingsProvider.tinyMappings.canonicalPath
-            args.add "-AoutMapFileNamedIntermediary=" + mappingsProvider.mappingsMixinExport.canonicalPath
-            args.add "-AoutRefMapFile=" + new File(destinationDir, refmapName).canonicalPath
-            args.add "-AdefaultObfuscationEnv=named:intermediary"
-        }
-    }
 }
 
 tasks.withType(Javadoc) {
@@ -80,8 +40,6 @@ tasks.withType(Javadoc) {
     }
 }
 
-def dataDir = file("$buildDir/datadump/")
-def dataCacheDir = file("$dataDir/.cache/")
 def outputDirectory = file("$buildDir/pom-properties")
 def pomProperties = file("$outputDirectory/pom.properties")
 
@@ -95,79 +53,23 @@ version=${project.version}
     outputs.file(pomProperties)
 }
 
-task generateData(type: JavaExec) {
-    doFirst {
-        dataDir.mkdirs()
-    }
-
-    classpath = sourceSets.data.runtimeClasspath
-
-    main = project.dataEntry
-
-    // arguments to pass to the application
-
-    workingDir dataDir
-    inputs.files sourceSets.data.output
-    outputs.dir dataDir
-    args dataDir.getAbsolutePath()
-
-    doLast {
-        dataCacheDir.delete()
-    }
-}
-
-processResources {
-    from(generateData.outputs.files) {
-        include "/data/"
-    }
-    from sourceSets.code.resources.srcDirs
-
-    inputs.properties "version": project.version, "description": project.description
-
-    from(sourceSets.main.resources.srcDirs) {
-        include "fabric.mod.json"
-        include "pack.mcmeta"
-        expand(
-                "version": project.version,
-                "description": project.description,
-                "repoOwner": project.repoOwner,
-                "repoName": project.repoName,
-                "id": project.modId,
-                "minecraftVersionLimit": project.minecraftVersionLimit,
-                "loaderVersionLimit": project.loaderVersionLimit
-        )
-    }
-
-    from(sourceSets.main.resources.srcDirs) {
-        exclude "fabric.mod.json"
-        exclude "pack.mcmeta"
-    }
-}
-
-// Loom will automatically attach sourcesJar to a RemapSourcesJar task and to the "build" task
-// if it is present.
-// If you remove this task, sources will not be generated.
 task sourcesJar(type: Jar, dependsOn: classes) {
     archiveClassifier.set "sources"
-    from sourceSets.code.allSource
+    from sourceSets.main.allSource
     from "LICENSE"
 }
 
 task javadocs(type: Javadoc) {
-    source = sourceSets.code.allJava
-    classpath = sourceSets.code.compileClasspath
+    source = sourceSets.main.allJava
+    classpath = sourceSets.main.compileClasspath
 
     options {
         if (file("readme.html").exists()) {
             overview = "readme.html"
         }
         links(
-                'https://google.github.io/guava/releases/21.0/api/docs/',
-                'http://asm.ow2.org/asm50/javadoc/user/',
-                'https://docs.oracle.com/javase/8/docs/api/',
-                'http://jenkins.liteloader.com/job/Mixin/javadoc/',
-                'https://logging.apache.org/log4j/2.x/log4j-api/apidocs/'
-                // Need to add minecraft jd publication once there is one available
+                'https://docs.oracle.com/javase/8/docs/api/'
+                // Add other deps' links!
         )
     }
 }
@@ -178,17 +80,13 @@ task javadocsJar(type: Jar, dependsOn: javadocs) {
 }
 
 jar {
-    dependsOn generateData
-    from sourceSets.code.output
     from "LICENSE"
 }
 
-afterEvaluate {
-    artifacts {
-        archives remapJar
-        // archives remapSourcesJar wait for loom pr
-        archives javadocsJar
-    }
+artifacts {
+    archives jar
+    archives sourcesJar
+    archives javadocsJar
 }
 
 bintray {
@@ -222,7 +120,6 @@ bintray {
     }
 }
 
-// configure the maven publication
 publishing {
     publications {
         mavenJava(MavenPublication) {
@@ -242,11 +139,9 @@ publishing {
             }
 
             // add all the jars that should be included when publishing to maven
-            afterEvaluate {
-                artifact remapJar
-                // artifact remapSourcesJar wait for loom pr
-                artifact javadocsJar
-            }
+            artifact jar
+            artifact sourcesJar
+            artifact javadocsJar
         }
     }
 
@@ -268,8 +163,8 @@ publishing {
                     }
                 }
 
-                // add all the jars that should be included when publishing to maven
-                artifact remapJar
+                // add all the jars that should be included when publishing to github
+                artifact jar
             }
         }
         // select the repositories you want to publish to
